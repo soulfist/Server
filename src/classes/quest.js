@@ -22,6 +22,35 @@ function getQuestsCache() {
     return questsCache;
 }
 
+function processReward(reward) {
+    let rewardItems = [];
+    let targets;
+    let mods = [];
+
+    // separate base item and mods, fix stacks
+    for (let item of reward.items) {
+        if (item._id === reward.target) {
+            targets = itm_hf.splitStack(item);
+        }
+        else {
+            mods.push(item);
+        }
+    }
+
+    // add mods to the base items, fix ids
+    for (let target of targets) {
+        let items = [ target ];
+
+        for (let mod of mods) {
+            items.push(itm_hf.clone(mod));
+        }
+
+        rewardItems = rewardItems.concat(itm_hf.replaceIDs(null, items));
+    }
+
+    return rewardItems;
+}
+
 /* Gets a flat list of reward items for the given quest and state
 * input: quest, a quest object
 * input: state, the quest status that holds the items (Started, Success, Fail)
@@ -29,60 +58,10 @@ function getQuestsCache() {
 */
 function getQuestRewardItems(quest, state) {
     let questRewards = [];
-    let targets = {}; // {targetId: [[item1, mod1, ...][item2, mod2, ...][...]]}
 
-    // First pass, fix stacks
     for (let reward of quest.rewards[state]) {
         if ("Item" === reward.type) {
-            targets[reward.target] = [];
-
-            for (let rewardItem of reward.items) {
-                // we're only interested in the main item here
-                if (rewardItem._id === reward.target) {
-                    let maxStack = json.parse(json.read(db.items[rewardItem._tpl]))._props.StackMaxSize;
-
-                    if (!("upd" in rewardItem)) {
-                        rewardItem.upd = {}
-                    }
-
-                    if (!("StackObjectsCount" in rewardItem.upd)) {
-                        rewardItem.upd.StackObjectsCount = 1;
-                    }
-
-                    let count = rewardItem.upd.StackObjectsCount;
-
-                    // create as many stacks as needed
-                    while (count !== 0) {
-                        let amount = Math.min(count, maxStack);
-                        let newStack = itm_hf.clone(rewardItem);
-
-                        newStack.upd.StackObjectsCount = amount;
-                        count -= amount;
-                        targets[reward.target].push([newStack]);
-                    }
-                }
-            }
-        }
-    }
-
-    // Second pass, add item attachments to each target, if any
-    for (let reward of quest.rewards[state]) {
-        if ("Item" === reward.type) {
-            for (let rewardItem of reward.items) {
-                if (rewardItem._id !== reward.target) {
-                    // all base items will receive the same attachments
-                    for (let target of targets[reward.target]) {
-                        target.push(itm_hf.clone(rewardItem));
-                    }
-                }
-            }
-        }
-    }
-
-    // Finally, fix ids
-    for (let target in targets) {
-        for (let items of targets[target]) {
-            questRewards = questRewards.concat(itm_hf.replaceIDs(null, items));
+            questRewards = questRewards.concat(processReward(reward));
         }
     }
 
@@ -126,6 +105,17 @@ function acceptQuest(pmcData, body, sessionID) {
 
 function completeQuest(pmcData, body, sessionID) {
     let state = "Success";
+    let intelCenterBonus = 0;//percentage of money reward
+
+    //find if player has money reward boost 
+    for(let area in pmcData.Hideout.Areas)
+    {
+        if(pmcData.Hideout.Areas[area].type == 11)
+        {
+            if(pmcData.Hideout.Areas[area].level == 1){intelCenterBonus = 5;}
+            if(pmcData.Hideout.Areas[area].level == 2){intelCenterBonus = 15;}
+        }
+    }
 
     for (let quest in pmcData.Quests) {
         if (pmcData.Quests[quest].qid === body.qid) {
@@ -136,6 +126,10 @@ function completeQuest(pmcData, body, sessionID) {
 
     // give reward
     let quest = json.parse(json.read(db.quests[body.qid]));
+    if(intelCenterBonus > 0)
+    { 
+        quest = applyMoneyBoost(quest,intelCenterBonus);    //money = money + (money*intelCenterBonus/100)
+    }
     let questRewards = getQuestRewardItems(quest, state);
 
     for (let reward of quest.rewards.Success) {
@@ -238,6 +232,20 @@ function handoverQuest(pmcData, body, sessionID) {
     return output;
 }
 
+function applyMoneyBoost(quest,moneyBoost)
+{
+    for (let reward in quest.rewards.Success)
+    {
+        if(quest.rewards.Success[reward].type == "Item")
+        {
+            if( itm_hf.isMoneyTpl(quest.rewards.Success[reward].items[0]._tpl) )
+            {
+                quest.rewards.Success[reward].items[0].upd.StackObjectsCount = quest.rewards.Success[reward].items[0].upd.StackObjectsCount + (quest.rewards.Success[reward].items[0].upd.StackObjectsCount*moneyBoost/100);
+            }
+        }
+    }
+    return quest;
+}
 /* Sets the item stack to value, or delete the item if value <= 0 */
 // TODO maybe merge this function and the one from customization
 function changeItemStack(pmcData, id, value, output) {

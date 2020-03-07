@@ -53,6 +53,10 @@ class ProfileServer {
         return this.getProfile(sessionID, 'scav');
     }
 
+    setScavProfile(sessionID, scavData) {
+        this.profiles[sessionID]['scav'] = scavData;
+    }
+
     createProfile(info, sessionID) {
         let account = account_f.accountServer.find(sessionID);
         let folder = account_f.getPath(account.id);
@@ -71,7 +75,7 @@ class ProfileServer {
         storage.data._id = "pmc" + account.id;
 
         // set trader standing      
-        for (let trader of Object.keys(db.traders)) {
+        for (let trader in db.assort) {
             pmcData.TraderStandings[trader] = {
                 "currentLevel": 1,
                 "currentSalesSum": 0,
